@@ -1,18 +1,26 @@
 import { rotationsOf } from './geometry';
 import type { PackingItem, PackingPlan, Risk, Suitcase } from './models';
 
+const RESERVE_CAUSES = new Set(['weight-reserve', 'volume-reserve']);
+
 export function detectRisks(plan: PackingPlan, suitcase: Suitcase, items: PackingItem[]): Risk[] {
   const risks: Risk[] = [];
   const byId = new Map(items.map((item) => [item.id, item]));
 
+  // 物理红线始终以箱体本身为界，不能超过出厂承重。
   if (plan.totalWeight > suitcase.maxWeight) risks.push({ id: 'overweight', severity: 'critical', title: '行李超重', message: `超出承重 ${(plan.totalWeight - suitcase.maxWeight).toFixed(1)} kg，请移除重物。` });
-  else if (plan.totalWeight / suitcase.maxWeight > 0.9) risks.push({ id: 'near-weight', severity: 'warning', title: '接近承重上限', message: '建议预留至少 10% 承重余量。' });
-  if (plan.capacityRatio > 0.9) risks.push({ id: 'high-volume', severity: 'warning', title: '空间接近满载', message: '空间利用率超过 90%，返程新增物品可能无法装入。' });
+  else if (plan.usableWeight > 0 && plan.totalWeight / plan.usableWeight >= 0.9) risks.push({ id: 'near-weight', severity: 'warning', title: '接近当前方案承重额度', message: `已用到可用承重的 ${Math.round(plan.usableWeightRatio * 100)}%，建议保留至少 10% 余量。` });
+  if (plan.usableVolume > 0 && plan.usedVolume / plan.usableVolume >= 0.9) risks.push({ id: 'high-volume', severity: 'warning', title: '当前方案空间接近满载', message: `已用到可用空间的 ${Math.round(plan.usableVolumeRatio * 100)}%，预留额度内几乎没有余量。` });
 
-  for (const { item } of plan.unplaced) {
+  for (const { item, cause } of plan.unplaced) {
     const oversized = rotationsOf(item).every((d) => d.length > suitcase.length || d.width > suitcase.width || d.height > suitcase.height);
     if (oversized) risks.push({ id: `oversized-${item.id}`, severity: 'critical', title: `${item.name} 尺寸越界`, message: '任意旋转方向都无法放入当前行李箱。', itemId: item.id });
-    if (item.mustHave) risks.push({ id: `missing-${item.id}`, severity: 'critical', title: `必需品未装入：${item.name}`, message: '请调整清单或改用更大行李箱。', itemId: item.id });
+    if (item.mustHave) {
+      const message = RESERVE_CAUSES.has(cause)
+        ? '必带物品受当前方案的空间/重量预留限制而未能装入，请下调预留比例或更换更大行李箱。'
+        : '必带物品超出当前行李箱的物理容量，请调整清单或改用更大行李箱。';
+      risks.push({ id: `missing-${item.id}`, severity: 'critical', title: `必需品未装入：${item.name}`, message, itemId: item.id });
+    }
   }
 
   for (const placement of plan.placements) {

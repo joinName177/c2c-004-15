@@ -55,4 +55,17 @@ describe('Luggage planner App', () => {
     await wrapper.get('[data-testid="print-button"]').trigger('click');
     expect(getPrintCount()).toBe(1);
   });
+
+  it('reserves space independently from weight and reflects quotas after repacking', async () => {
+    const { wrapper } = render();
+    // 购物版空间预留 100%、重量预留保持默认；重新装箱后不应装入任何物品。
+    const spaceSlider = wrapper.get('[aria-label="shopping空间预留百分比"]');
+    await spaceSlider.setValue('100');
+    await wrapper.get('button.primary').trigger('click');
+    await wrapper.get('[data-plan="shopping"]').trigger('click');
+    const shopping = wrapper.text();
+    expect(shopping).toContain('0 件装入');
+    expect(shopping).toContain('空间预留');
+    expect(shopping).toContain('未装入说明');
+  });
 });

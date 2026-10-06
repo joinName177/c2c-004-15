@@ -1,8 +1,6 @@
 import { intersects, rotationsOf } from './geometry';
-import { itemVolume, suitcaseVolume, type PackingItem, type PackingPlan, type Placement, type PlanMode, type Suitcase } from './models';
-
-const PLAN_NAMES: Record<PlanMode, string> = { minimal: '精简版', comfort: '舒适版', shopping: '购物版' };
-const RESERVE: Record<PlanMode, number> = { minimal: 0.8, comfort: 1, shopping: 0.65 };
+import { PLAN_NAMES } from './reserves';
+import { itemVolume, suitcaseVolume, type PackingItem, type PackingPlan, type Placement, type PlanMode, type PlanReserves, type Suitcase, type UnplacedCause, type UnplacedItem } from './models';
 
 export function validateSuitcase(suitcase: Suitcase): string[] {
   const errors: string[] = [];
@@ -35,25 +33,38 @@ function candidatePoints(placements: Placement[]) {
   return points.sort((a, b) => a.z - b.z || a.y - b.y || a.x - b.x);
 }
 
-export function packItems(suitcase: Suitcase, items: PackingItem[], mode: PlanMode): PackingPlan {
+function fitsEmptyBox(dimensions: Placement['dimensions'], suitcase: Suitcase): boolean {
+  return dimensions.length <= suitcase.length && dimensions.width <= suitcase.width && dimensions.height <= suitcase.height;
+}
+
+/**
+ * 空间预留与重量预留独立计算：分别从箱体总容积、最大承重中扣除各自比例，
+ * 绝不用空间比例折算重量。必带物品同样受两套额度约束，不会被破例装入。
+ */
+export function packItems(suitcase: Suitcase, items: PackingItem[], mode: PlanMode, reserves: PlanReserves): PackingPlan {
   const placements: Placement[] = [];
-  const unplaced: PackingPlan['unplaced'] = [];
-  const capacity = suitcaseVolume(suitcase) * RESERVE[mode];
-  const maxWeight = suitcase.maxWeight * RESERVE[mode];
+  const unplaced: UnplacedItem[] = [];
+  const fail = (item: PackingItem, reason: string, cause: UnplacedCause): UnplacedItem => ({ item, reason, cause });
+
+  const boxVolume = suitcaseVolume(suitcase);
+  const reservedVolume = boxVolume * reserves.spaceReserve;
+  const reservedWeight = suitcase.maxWeight * reserves.weightReserve;
+  const usableVolume = boxVolume - reservedVolume;
+  const usableWeight = suitcase.maxWeight - reservedWeight;
   let totalWeight = 0;
   let usedVolume = 0;
 
   for (const item of ordered(items, mode)) {
     if ([item.length, item.width, item.height, item.weight].some((value) => !(value > 0))) {
-      unplaced.push({ item, reason: '尺寸或重量无效' });
+      unplaced.push(fail(item, '尺寸或重量无效', 'invalid'));
       continue;
     }
-    if (totalWeight + item.weight > maxWeight) {
-      unplaced.push({ item, reason: '超过当前方案承重预留' });
+    if (totalWeight + item.weight > usableWeight) {
+      unplaced.push(fail(item, `重量预留限制：当前方案预留 ${Math.round(reserves.weightReserve * 100)}% 承重，可用额度不足`, 'weight-reserve'));
       continue;
     }
-    if (usedVolume + itemVolume(item) > capacity) {
-      unplaced.push({ item, reason: '超过当前方案空间预留' });
+    if (usedVolume + itemVolume(item) > usableVolume) {
+      unplaced.push(fail(item, `空间预留限制：当前方案预留 ${Math.round(reserves.spaceReserve * 100)}% 容积，可用额度不足`, 'volume-reserve'));
       continue;
     }
 
@@ -61,10 +72,7 @@ export function packItems(suitcase: Suitcase, items: PackingItem[], mode: PlanMo
     for (const point of candidatePoints(placements)) {
       for (const dimensions of rotationsOf(item)) {
         const candidate: Placement = { itemId: item.id, ...point, dimensions };
-        const inBounds = candidate.x + dimensions.length <= suitcase.length
-          && candidate.y + dimensions.width <= suitcase.width
-          && candidate.z + dimensions.height <= suitcase.height;
-        if (inBounds && placements.every((placed) => !intersects(candidate, placed))) {
+        if (fitsEmptyBox(dimensions, suitcase) && placements.every((placed) => !intersects(candidate, placed))) {
           placement = candidate;
           break;
         }
@@ -73,7 +81,15 @@ export function packItems(suitcase: Suitcase, items: PackingItem[], mode: PlanMo
     }
 
     if (!placement) {
-      unplaced.push({ item, reason: '没有可用的连续空间' });
+      // 任意旋转都无法进入空箱体，是箱体本身不足；否则是预留额度下剩余空间被切碎。
+      const physicallyFits = rotationsOf(item).some((dimensions) => fitsEmptyBox(dimensions, suitcase));
+      if (!physicallyFits) {
+        unplaced.push(fail(item, '箱体本身不足：任意旋转方向都无法放入当前行李箱', 'box-limit'));
+      } else if (reserves.spaceReserve > 0) {
+        unplaced.push(fail(item, `空间预留限制：预留 ${Math.round(reserves.spaceReserve * 100)}% 后没有连续空间可用`, 'volume-reserve'));
+      } else {
+        unplaced.push(fail(item, '箱体本身不足：没有可用的连续空间', 'box-limit'));
+      }
       continue;
     }
     placements.push(placement);
@@ -88,6 +104,13 @@ export function packItems(suitcase: Suitcase, items: PackingItem[], mode: PlanMo
     unplaced,
     totalWeight,
     usedVolume,
-    capacityRatio: suitcaseVolume(suitcase) ? usedVolume / suitcaseVolume(suitcase) : 0,
+    capacityRatio: boxVolume ? usedVolume / boxVolume : 0,
+    reserves,
+    usableVolume,
+    usableWeight,
+    reservedVolume,
+    reservedWeight,
+    usableVolumeRatio: usableVolume > 0 ? usedVolume / usableVolume : 0,
+    usableWeightRatio: usableWeight > 0 ? totalWeight / usableWeight : 0,
   };
 }

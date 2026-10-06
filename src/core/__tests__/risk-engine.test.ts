@@ -4,17 +4,21 @@ import type { PackingItem, PackingPlan, Suitcase } from '../models';
 
 const suitcase: Suitcase = { length: 10, width: 8, height: 6, maxWeight: 10 };
 const item = (id: string, overrides: Partial<PackingItem> = {}): PackingItem => ({ id, name: id, category: '其他', length: 2, width: 2, height: 2, weight: 1, priority: 2, mustHave: false, ...overrides });
-const basePlan = (): PackingPlan => ({ id: 'comfort', name: '舒适版', placements: [], unplaced: [], totalWeight: 0, usedVolume: 0, capacityRatio: 0 });
+const basePlan = (): PackingPlan => ({
+  id: 'comfort', name: '舒适版', placements: [], unplaced: [], totalWeight: 0, usedVolume: 0, capacityRatio: 0,
+  reserves: { spaceReserve: 0, weightReserve: 0 }, usableVolume: 480, usableWeight: 10,
+  reservedVolume: 0, reservedWeight: 0, usableVolumeRatio: 0, usableWeightRatio: 0,
+});
 
 describe('detectRisks', () => {
   it('reports overweight and high volume', () => {
-    const plan = { ...basePlan(), totalWeight: 11, usedVolume: 460, capacityRatio: 0.96 };
+    const plan = { ...basePlan(), totalWeight: 11, usedVolume: 460, capacityRatio: 0.96, usableVolume: 480, usableWeight: 10, usableVolumeRatio: 460 / 480, usableWeightRatio: 1.1 };
     expect(detectRisks(plan, suitcase, []).map((risk) => risk.id)).toEqual(expect.arrayContaining(['overweight', 'high-volume']));
   });
 
   it('reports an oversized unplaced item', () => {
     const huge = item('huge', { length: 11 });
-    const plan = { ...basePlan(), unplaced: [{ item: huge, reason: '没有可用的连续空间' }] };
+    const plan = { ...basePlan(), unplaced: [{ item: huge, reason: '箱体本身不足', cause: 'box-limit' as const }] };
     expect(detectRisks(plan, suitcase, [huge]).some((risk) => risk.id === 'oversized-huge')).toBe(true);
   });
 
@@ -36,7 +40,15 @@ describe('detectRisks', () => {
 
   it('marks an omitted must-have item as critical', () => {
     const required = item('passport', { mustHave: true });
-    const plan = { ...basePlan(), unplaced: [{ item: required, reason: '空间不足' }] };
-    expect(detectRisks(plan, suitcase, [required])).toContainEqual(expect.objectContaining({ id: 'missing-passport', severity: 'critical' }));
+    const plan = { ...basePlan(), unplaced: [{ item: required, reason: '空间预留限制', cause: 'volume-reserve' as const }] };
+    const risks = detectRisks(plan, suitcase, [required]);
+    expect(risks).toContainEqual(expect.objectContaining({ id: 'missing-passport', severity: 'critical' }));
+    expect(risks.find((risk) => risk.id === 'missing-passport')?.message).toContain('预留');
+  });
+
+  it('attributes a box-limit must-have omission to the suitcase rather than reserves', () => {
+    const required = item('passport', { mustHave: true, length: 30 });
+    const plan = { ...basePlan(), unplaced: [{ item: required, reason: '箱体本身不足', cause: 'box-limit' as const }] };
+    expect(detectRisks(plan, suitcase, [required]).find((risk) => risk.id === 'missing-passport')?.message).toContain('行李箱');
   });
 });

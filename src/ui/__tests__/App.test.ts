@@ -55,4 +55,34 @@ describe('Luggage planner App', () => {
     await wrapper.get('[data-testid="print-button"]').trigger('click');
     expect(getPrintCount()).toBe(1);
   });
+
+  it('shows used and remaining allowance on the plan cards', () => {
+    const { wrapper } = render();
+    const shopping = wrapper.get('[data-plan="shopping"]');
+    expect(shopping.text()).toContain('空间');
+    expect(shopping.text()).toContain('承重');
+    expect(shopping.text()).toMatch(/已用 .* 余/);
+  });
+
+  it('updates a plan reserve and rejects out-of-range input', async () => {
+    const { wrapper } = render();
+    const input = wrapper.get('[aria-label="购物版空间预留"]');
+    await input.setValue('50');
+    expect(wrapper.text()).toContain('方案待更新');
+    await input.setValue('150');
+    expect(wrapper.text()).toContain('未保存');
+    await wrapper.get('.primary').trigger('click');
+    expect(wrapper.get('[data-plan="shopping"]').text()).toContain('20.9');
+  });
+
+  it('lists unplaced items with reserve reasons and remaining allowance', async () => {
+    const { wrapper } = render();
+    await wrapper.get('[aria-label="购物版重量预留"]').setValue('100');
+    await wrapper.get('[data-plan="shopping"]').trigger('click');
+    await wrapper.get('.primary').trigger('click');
+    const panel = wrapper.get('[data-testid="unplaced-panel"]');
+    expect(panel.text()).toContain('承重余');
+    expect(panel.text()).toContain('空间余');
+    expect(panel.text()).toContain('受重量预留限制');
+  });
 });

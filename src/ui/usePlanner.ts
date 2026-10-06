@@ -2,7 +2,8 @@ import { computed, reactive, ref } from 'vue';
 import { createSampleSnapshot } from '../core/sample-data';
 import { generatePlans } from '../core/plan-service';
 import { detectRisks } from '../core/risk-engine';
-import type { PackingItem, PackingSnapshot, PlanMode, Suitcase } from '../core/models';
+import { validateReserve } from '../core/packing-engine';
+import type { PackingItem, PackingSnapshot, PlanMode, PlanReserve, Suitcase } from '../core/models';
 import type { PlannerRepository } from '../ports/planner-repository.port';
 import type { PrintPort } from '../ports/print.port';
 
@@ -13,7 +14,7 @@ export function usePlanner({ repository, printPort }: PlannerDependencies) {
   const state = reactive<PackingSnapshot>(loaded.value);
   const notice = ref(loaded.warning ?? '');
   const isStale = ref(false);
-  const plans = ref(generatePlans(state.suitcase, state.items));
+  const plans = ref(generatePlans(state.suitcase, state.items, state.reserves));
   const currentPlan = computed(() => plans.value[state.selectedPlan]);
   const risks = computed(() => detectRisks(currentPlan.value, state.suitcase, state.items));
 
@@ -28,16 +29,26 @@ export function usePlanner({ repository, printPort }: PlannerDependencies) {
   }
   function removeItem(id: string) { state.items = state.items.filter((item) => item.id !== id); markStale(); }
   function updateSuitcase(patch: Partial<Suitcase>) { Object.assign(state.suitcase, patch); markStale(); }
-  function regenerate() { plans.value = generatePlans(state.suitcase, state.items); isStale.value = false; notice.value = '三套方案已重新计算'; save(); }
+  function updateReserve(mode: PlanMode, patch: Partial<PlanReserve>) {
+    const next = { ...state.reserves[mode], ...patch };
+    const errors = validateReserve(next);
+    if (errors.length) {
+      notice.value = `${plans.value[mode].name}：${errors[0]}，未保存`;
+      return;
+    }
+    state.reserves[mode] = next;
+    markStale();
+  }
+  function regenerate() { plans.value = generatePlans(state.suitcase, state.items, state.reserves); isStale.value = false; notice.value = '三套方案已重新计算'; save(); }
   function selectPlan(mode: PlanMode) { state.selectedPlan = mode; save(); }
   function resetSample() {
     const sample = createSampleSnapshot();
     Object.assign(state, sample);
-    plans.value = generatePlans(state.suitcase, state.items);
+    plans.value = generatePlans(state.suitcase, state.items, state.reserves);
     isStale.value = false;
     notice.value = '已恢复登机箱示例';
     save();
   }
 
-  return { state, notice, isStale, plans, currentPlan, risks, addItem, updateItem, removeItem, updateSuitcase, regenerate, selectPlan, resetSample, print: () => printPort.print() };
+  return { state, notice, isStale, plans, currentPlan, risks, addItem, updateItem, removeItem, updateSuitcase, updateReserve, regenerate, selectPlan, resetSample, print: () => printPort.print() };
 }

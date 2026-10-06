@@ -23,4 +23,16 @@ describe('generatePlans', () => {
     expect(plans.shopping.usedVolume).toBeLessThanOrEqual(plans.comfort.usedVolume);
     expect(plans.shopping.unplaced.length).toBeGreaterThanOrEqual(plans.comfort.unplaced.length);
   });
+
+  it('applies independent space and weight reserves per plan', () => {
+    const plans = generatePlans(box, [item('coat')], {
+      minimal: { space: 0, weight: 0 },
+      comfort: { space: 0.5, weight: 0 },
+      shopping: { space: 0, weight: 0.5 },
+    });
+    expect(plans.comfort.volumeAllowance).toBeCloseTo(240);
+    expect(plans.comfort.weightAllowance).toBe(10);
+    expect(plans.shopping.volumeAllowance).toBe(480);
+    expect(plans.shopping.weightAllowance).toBe(5);
+  });
 });

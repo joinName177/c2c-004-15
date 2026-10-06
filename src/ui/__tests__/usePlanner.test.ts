@@ -36,4 +36,29 @@ describe('usePlanner', () => {
     expect(planner.plans.value.shopping.name).toBe('购物版');
     expect(repository.saved?.selectedPlan).toBe('shopping');
   });
+
+  it('saves valid reserve updates and regenerates with the new allowance', () => {
+    const repository = new MemoryRepository();
+    const planner = usePlanner({ repository, printPort: { print() {} } });
+    planner.updateReserve('shopping', { space: 0.5 });
+    expect(planner.state.reserves.shopping).toEqual({ space: 0.5, weight: 0.35 });
+    expect(repository.saved?.reserves.shopping).toEqual({ space: 0.5, weight: 0.35 });
+    expect(planner.isStale.value).toBe(true);
+    planner.regenerate();
+    expect(planner.plans.value.shopping.weightAllowance).toBeCloseTo(6.5);
+    expect(planner.plans.value.shopping.volumeAllowance).toBeCloseTo(52 * 35 * 23 * 0.5);
+  });
+
+  it('rejects out-of-range reserves without saving them', () => {
+    const repository = new MemoryRepository();
+    const planner = usePlanner({ repository, printPort: { print() {} } });
+    planner.updateReserve('shopping', { weight: 1.2 });
+    expect(planner.state.reserves.shopping.weight).toBe(0.35);
+    expect(repository.saved).toBeUndefined();
+    expect(planner.notice.value).toContain('未保存');
+    planner.updateReserve('minimal', { space: -0.1 });
+    expect(planner.state.reserves.minimal.space).toBe(0.2);
+    expect(repository.saved).toBeUndefined();
+    expect(planner.notice.value).toContain('空间预留比例必须在 0% 到 100% 之间');
+  });
 });

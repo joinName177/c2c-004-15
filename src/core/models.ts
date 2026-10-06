@@ -24,13 +24,27 @@ export interface Placement {
   dimensions: Dimensions;
 }
 
+export interface PlanReserve {
+  /** 空间预留比例（0–1），只从箱体容积中扣除 */
+  space: number;
+  /** 重量预留比例（0–1），只从箱体承重中扣除 */
+  weight: number;
+}
+
+export type PlanReserves = Record<PlanMode, PlanReserve>;
+
 export interface PackingPlan {
   id: PlanMode;
   name: string;
+  reserve: PlanReserve;
   placements: Placement[];
   unplaced: Array<{ item: PackingItem; reason: string }>;
   totalWeight: number;
   usedVolume: number;
+  /** 扣除重量预留后的可用承重（kg） */
+  weightAllowance: number;
+  /** 扣除空间预留后的可用容积（cm³） */
+  volumeAllowance: number;
   capacityRatio: number;
 }
 
@@ -46,6 +60,7 @@ export interface PackingSnapshot {
   suitcase: Suitcase;
   items: PackingItem[];
   selectedPlan: PlanMode;
+  reserves: PlanReserves;
 }
 
 export function itemVolume(item: Dimensions): number {
